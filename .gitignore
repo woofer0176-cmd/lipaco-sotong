@@ -1,0 +1,5 @@
+# GitHub에는 앱 화면(index.html, logo.png)만 올립니다
+*
+!.gitignore
+!index.html
+!logo.png
