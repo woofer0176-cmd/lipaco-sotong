@@ -1,0 +1,14 @@
+{
+  "name": "LIPACO 疏通",
+  "short_name": "疏通",
+  "description": "LIPACO 직원 소통 · 기능 요청",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0B4A7D",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"}
+  ]
+}

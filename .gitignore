@@ -3,3 +3,8 @@
 !.gitignore
 !index.html
 !logo.png
+!manifest.json
+!og-image.png
+!icon-192.png
+!icon-512.png
+!apple-touch-icon.png
