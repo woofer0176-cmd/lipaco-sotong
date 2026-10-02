@@ -68,6 +68,9 @@ textarea{min-height:140px;resize:vertical;}
 .item{cursor:pointer;}
 .item .top{display:flex;gap:6px;align-items:center;margin-bottom:4px;flex-wrap:wrap;}
 .item h3{font-size:16px;font-weight:700;word-break:break-all;}
+.new-dot{display:inline-block;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#E53935;color:#fff;font-size:11px;font-weight:700;line-height:18px;text-align:center;margin-left:4px;vertical-align:middle;}
+.item.unread{border-left:4px solid #E53935;}
+.new-tag{font-size:12px;font-weight:700;color:#E53935;}
 .badge{font-size:12px;padding:1px 9px;border-radius:10px;font-weight:500;white-space:nowrap;}
 .s0{background:#E8EEF3;color:#0B4A7D;}
 .s1{background:#EDE7F6;color:#5E35B1;}
@@ -134,8 +137,8 @@ nav.tabs button{font-size:14px;}
   <section id="app-view" hidden>
     <nav class="tabs">
       <button data-tab="write" class="on">✏️ 요청</button>
-      <button data-tab="list">📋 목록</button>
-      <button data-tab="notice">📢 공지</button>
+      <button data-tab="list">📋 목록<span class="new-dot" id="t-list" hidden></span></button>
+      <button data-tab="notice">📢 공지<span class="new-dot" id="t-notice" hidden></span></button>
       <button data-tab="help">❓ 이용방법</button>
     </nav>
     <main>
@@ -330,21 +333,22 @@ function store(key, value) {
 }
 
 /* ---------------- 서버 연결 ---------------- */
-async function api(action, extra) {
+async function api(action, extra, quiet) {
   const payload = Object.assign({action, name: me && me.name, pin: me && me.pin}, extra || {});
   if (DEMO) return demoApi(payload);
+  if (quiet) return apiCall(payload);
   api.pending = (api.pending || 0) + 1;
   $('loading').classList.add('on');
-  try {
-    let res;
-    try { res = await fetch(CONFIG.scriptUrl, {method: 'POST', body: JSON.stringify(payload)}); }
-    catch (e) { throw new Error('인터넷 연결을 확인해 주세요'); }
-    const out = await res.json();
-    if (!out.ok) throw new Error(out.error || '오류가 발생했습니다');
-    return out.data;
-  } finally {
-    if (--api.pending === 0) $('loading').classList.remove('on');
-  }
+  try { return await apiCall(payload); }
+  finally { if (--api.pending === 0) $('loading').classList.remove('on'); }
+}
+async function apiCall(payload) {
+  let res;
+  try { res = await fetch(CONFIG.scriptUrl, {method: 'POST', body: JSON.stringify(payload)}); }
+  catch (e) { throw new Error('인터넷 연결을 확인해 주세요'); }
+  const out = await res.json();
+  if (!out.ok) throw new Error(out.error || '오류가 발생했습니다');
+  return out.data;
 }
 
 /* ---------------- 시험판 (이 기기에만 저장) ---------------- */
@@ -407,10 +411,12 @@ function demoApi(p) {
 /* ---------------- 로그인 ---------------- */
 async function login(name, pin, saved) {
   me = {name, pin, admin: !!(saved && saved.admin)};
+  seen.cache = null;
   const btn = $('lg-btn');
   if (saved) {
     // 지난번 로그인 정보로 바로 화면을 보여 주고, 뒤에서 확인
-    data = store('reqapp-cache') || data;
+    const cache = store('reqapp-cache');
+    if (cache) { data = cache; data.ready = true; }
     showApp();
   } else {
     btn.disabled = true;
@@ -435,6 +441,9 @@ async function login(name, pin, saved) {
   }
 }
 function logout() {
+  try { navigator.clearAppBadge && navigator.clearAppBadge().catch(() => {}); } catch (e) {}
+  document.title = CONFIG.company + ' 疏通';
+  seen.cache = null;
   me = null;
   store('reqapp-me', null);
   store('reqapp-cache', null);
@@ -460,6 +469,9 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => show
 function showTab(name) {
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('on', p.id === 'tab-' + name));
+  if (showTab.last === 'notice' && name !== 'notice') renderNotices();   // 읽은 공지의 '새 공지' 표시 지우기
+  if (name === 'notice') markNoticesSeen();
+  showTab.last = name;
   if ((name === 'list' || name === 'notice') && Date.now() - (refresh.at || 0) > 15000) refresh();
   window.scrollTo(0, 0);
 }
@@ -548,18 +560,78 @@ $('w-send').onclick = async () => {
 /* ---------------- 목록 ---------------- */
 function setData(list) {
   data = list;
+  data.ready = true;
   refresh.at = Date.now();
   store('reqapp-cache', data);
+  markOwnSeen();
   renderList();
   renderNotices();
 }
-async function refresh() {
+async function refresh(quiet) {
   if (refresh.busy) return;
   refresh.busy = true;
-  try { setData(await api('list')); }
-  catch (e) { toast(e.message); }
+  try { setData(await api('list', null, quiet)); }
+  catch (e) { if (!quiet) toast(e.message); }
   finally { refresh.busy = false; }
 }
+
+/* ---------------- 안 읽은 글 숫자 (맥 Dock·작업 표시줄 아이콘) ---------------- */
+// 이 기기에서 읽은 기록: {req: {요청ID: 읽은 댓글 수}, notice: {공지ID: 1}}
+function seen(save) {
+  let s = seen.cache || (seen.cache = store('reqapp-seen-' + me.name));
+  if (!s && !data.ready) return {req: {}, notice: {}};   // 서버 목록을 받기 전에는 기준을 잡지 않음
+  if (!s) {   // 처음 쓰는 기기: 지금 있는 글은 모두 읽은 것으로 시작
+    s = seen.cache = {req: {}, notice: {}};
+    data.requests.forEach(r => { s.req[r.id] = r.comments || 0; });
+    data.notices.forEach(n => { s.notice[n.id] = 1; });
+    save = true;
+  }
+  if (save) store('reqapp-seen-' + me.name, s);
+  return s;
+}
+function unreadOf(r) {
+  const s = seen().req;
+  if (!data.ready) return 0;
+  return r.id in s ? Math.max(0, (r.comments || 0) - s[r.id]) : 1 + (r.comments || 0);
+}
+function markOwnSeen() {
+  const s = seen();
+  let changed = false;
+  data.requests.forEach(r => {   // 내가 올린 새 요청은 알릴 필요 없음
+    if (r.author === me.name && !(r.id in s.req)) { s.req[r.id] = r.comments || 0; changed = true; }
+  });
+  if ($('tab-notice').classList.contains('on') && !document.hidden && document.hasFocus()) changed = markNoticesSeen(true) || changed;
+  if (changed) seen(true);
+}
+function markNoticesSeen(noSave) {
+  const s = seen();
+  let changed = false;
+  data.notices.forEach(n => { if (!s.notice[n.id]) { s.notice[n.id] = 1; changed = true; } });
+  if (changed && !noSave) { seen(true); updateBadge(); }
+  return changed;
+}
+function updateBadge() {
+  if (!me) return;
+  const s = seen();
+  const reqs = data.requests.reduce((sum, r) => sum + unreadOf(r), 0);
+  const notices = data.notices.filter(n => !s.notice[n.id]).length;
+  const total = reqs + notices;
+  const dot = (el, n) => { el.hidden = !n; el.textContent = n > 99 ? '99+' : n; };
+  dot($('t-list'), reqs);
+  dot($('t-notice'), notices);
+  document.title = (total ? `(${total}) ` : '') + CONFIG.company + ' 疏通';
+  try {
+    if (!navigator.setAppBadge) return;
+    if (total) navigator.setAppBadge(total).catch(() => {});
+    else navigator.clearAppBadge().catch(() => {});
+  } catch (e) {}
+}
+// 공지 탭을 띄워 둔 채 다른 창을 보다가 돌아오면 그때 읽음 처리
+window.addEventListener('focus', () => {
+  if (me && $('tab-notice').classList.contains('on')) markNoticesSeen();
+});
+// 앱을 켜 두면(최소화해도) 1분마다 새 글을 확인
+setInterval(() => { if (me) refresh(true); }, 60000);
 function renderList() {
   const filters = ['전체', '내 요청'].concat(STATUSES);
   $('l-filters').innerHTML = filters.map(f =>
@@ -567,13 +639,18 @@ function renderList() {
   $('l-filters').querySelectorAll('button').forEach(b => b.onclick = () => { filter = b.dataset.f; renderList(); });
   const list = data.requests.filter(r =>
     filter === '전체' ? true : filter === '내 요청' ? r.author === me.name : r.status === filter);
-  $('l-items').innerHTML = list.length ? list.map(r => `
-    <div class="card item" data-id="${esc(r.id)}">
-      <div class="top">${badge(r.status)}<span class="cat">${esc(r.category)}</span></div>
+  $('l-items').innerHTML = list.length ? list.map(r => {
+    const n = unreadOf(r), isNew = !(r.id in seen().req);
+    const tag = n ? `<span class="new-tag">${isNew ? '새 요청' : '새 댓글 ' + n}</span>` : '';
+    return `
+    <div class="card item${n ? ' unread' : ''}" data-id="${esc(r.id)}">
+      <div class="top">${badge(r.status)}<span class="cat">${esc(r.category)}</span>${tag}</div>
       <h3>${esc(r.title)}</h3>
       <div class="meta">${esc(r.author)} · ${esc(String(r.date).slice(5, 16))} · 💬 ${r.comments || 0}${r.photoCount > 0 ? ' · 📷 ' + r.photoCount : ''}</div>
-    </div>`).join('') : '<div class="empty">아직 요청이 없습니다</div>';
+    </div>`;
+  }).join('') : '<div class="empty">아직 요청이 없습니다</div>';
   $('l-items').querySelectorAll('.item').forEach(el => el.onclick = () => openDetail(el.dataset.id));
+  updateBadge();
 }
 
 /* ---------------- 상세 ---------------- */
@@ -588,6 +665,10 @@ async function openDetail(id) {
   try {
     const d = await api('detail', {id});
     const r = d.request;
+    seen().req[id] = d.comments.length;   // 열어 본 요청은 읽음 처리
+    seen(true);
+    if (known) known.comments = d.comments.length;
+    renderList();
     $('d-body').innerHTML = `
       <div class="row"><div>${badge(r.status)} <span class="cat">${esc(r.category)}</span></div>
         <button class="btn light small" onclick="closeDetail()">닫기</button></div>
@@ -653,12 +734,14 @@ $('detail').onclick = e => { if (e.target.id === 'detail') closeDetail(); };
 
 /* ---------------- 공지 ---------------- */
 function renderNotices() {
+  const s = seen();
   $('n-items').innerHTML = data.notices.length ? data.notices.map(n => `
     <div class="card notice${n.important ? ' important' : ''}">
-      <div class="top" style="margin-bottom:4px;">${n.important ? '<span class="badge s2">중요</span> ' : ''}<span class="meta">${esc(String(n.date).slice(0, 10))} · ${esc(n.author)}</span></div>
+      <div class="top" style="margin-bottom:4px;">${s.notice[n.id] ? '' : '<span class="new-tag">새 공지</span> '}${n.important ? '<span class="badge s2">중요</span> ' : ''}<span class="meta">${esc(String(n.date).slice(0, 10))} · ${esc(n.author)}</span></div>
       <h2>${esc(n.title)}</h2>
       <div class="body-text" style="margin-top:4px;">${esc(n.content)}</div>
     </div>`).join('') : '<div class="empty">공지가 없습니다</div>';
+  updateBadge();
 }
 $('n-send').onclick = async () => {
   const title = $('n-title').value.trim(), content = $('n-content').value.trim();
