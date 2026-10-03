@@ -590,7 +590,7 @@ async function refresh(quiet) {
 }
 
 /* ---------------- 안 읽은 글 숫자 (맥 Dock·작업 표시줄 아이콘) ---------------- */
-// 이 기기에서 읽은 기록: {req: {요청ID: 읽은 댓글 수}, notice: {공지ID: 1}}
+// 이 기기에서 읽은 기록: {req: {요청ID: 읽은 댓글 수}, st: {요청ID: 마지막으로 본 진행 상태}, notice: {공지ID: 1}}
 function seen(save) {
   let s = seen.cache || (seen.cache = store('reqapp-seen-' + me.name));
   if (!s && !data.ready) return {req: {}, notice: {}};   // 서버 목록을 받기 전에는 기준을 잡지 않음
@@ -600,19 +600,31 @@ function seen(save) {
     data.notices.forEach(n => { s.notice[n.id] = 1; });
     save = true;
   }
+  if (!s.st && data.ready) {   // 진행 상태 기록이 없던 예전 기록: 지금 상태를 본 것으로 시작
+    s.st = {};
+    data.requests.forEach(r => { s.st[r.id] = r.status; });
+    save = true;
+  }
+  s.st = s.st || {};
   if (save) store('reqapp-seen-' + me.name, s);
   return s;
 }
 function unreadOf(r) {
   const s = seen().req;
   if (!data.ready) return 0;
-  return r.id in s ? Math.max(0, (r.comments || 0) - s[r.id]) : 1 + (r.comments || 0);
+  return (r.id in s ? Math.max(0, (r.comments || 0) - s[r.id]) : 1 + (r.comments || 0)) + (statusChanged(r) ? 1 : 0);
+}
+// 내가 올린 요청의 진행 상태가 바뀌었는데 아직 못 봤는지
+function statusChanged(r) {
+  const st = seen().st;
+  return r.author === me.name && r.id in st && st[r.id] !== r.status;
 }
 function markOwnSeen() {
   const s = seen();
   let changed = false;
   data.requests.forEach(r => {   // 내가 올린 새 요청은 알릴 필요 없음
     if (r.author === me.name && !(r.id in s.req)) { s.req[r.id] = r.comments || 0; changed = true; }
+    if (!(r.id in s.st)) { s.st[r.id] = r.status; changed = true; }
   });
   if ($('tab-notice').classList.contains('on') && !document.hidden && document.hasFocus()) changed = markNoticesSeen(true) || changed;
   if (changed) seen(true);
@@ -685,8 +697,11 @@ function renderList() {
   const list = data.requests.filter(r =>
     filter === '전체' ? true : filter === '미완료' ? isTodo(r) : filter === '내 요청' ? r.author === me.name : r.status === filter);
   $('l-items').innerHTML = list.length ? list.map(r => {
-    const n = unreadOf(r), isNew = !(r.id in seen().req);
-    const tag = n ? `<span class="new-tag">${isNew ? '새 요청' : '새 댓글 ' + n}</span>` : '';
+    const n = unreadOf(r), isNew = !(r.id in seen().req), moved = statusChanged(r), talk = n - (moved ? 1 : 0);
+    const tags = [];
+    if (moved) tags.push(`'${esc(r.status)}'(으)로 바뀜`);
+    if (talk) tags.push(isNew ? '새 요청' : '새 댓글 ' + talk);
+    const tag = tags.length ? `<span class="new-tag">${tags.join(' · ')}</span>` : '';
     return `
     <div class="card item${n ? ' unread' : ''}" data-id="${esc(r.id)}">
       <div class="top">${badge(r.status)}<span class="cat">${esc(r.category)}</span>${tag}</div>
@@ -711,6 +726,8 @@ async function openDetail(id) {
     const d = await api('detail', {id});
     const r = d.request;
     seen().req[id] = d.comments.length;   // 열어 본 요청은 읽음 처리
+    seen().st[id] = r.status;
+    if (known) known.status = r.status;
     seen(true);
     if (known) known.comments = d.comments.length;
     renderList();
@@ -739,9 +756,10 @@ async function openDetail(id) {
     if (me.admin) $('d-status').onchange = async e => {
       const status = e.target.value, item = data.requests.find(x => x.id === id);
       const before = item && item.status;
+      seen().st[id] = status; seen(true);   // 내가 바꾼 상태는 알릴 필요 없음
       if (item) { item.status = status; renderList(); }
       try { await api('status', {id, status}); toast('상태를 바꿨습니다'); }
-      catch (err) { if (item) { item.status = before; renderList(); } e.target.value = before; toast(err.message); }
+      catch (err) { seen().st[id] = before; seen(true); if (item) { item.status = before; renderList(); } e.target.value = before; toast(err.message); }
     };
     $('d-send').onclick = async () => {
       const text = $('d-text').value.trim();
