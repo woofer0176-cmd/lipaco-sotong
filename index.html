@@ -73,6 +73,8 @@ textarea{min-height:140px;resize:vertical;}
 .perm-bar{display:flex;align-items:center;gap:10px;margin:12px 16px 0;padding:10px 14px;border-radius:12px;background:#FFF4E5;color:#7A4B00;font-size:14px;}
 .perm-bar span{flex:1;}
 .perm-bar .btn{background:#E53935;}
+.perm-bar.install{background:#E8F1FB;color:var(--main);}
+.perm-bar.install .btn{background:var(--main);}
 [hidden]{display:none !important;}
 .todo-bar{display:flex;align-items:center;gap:8px;margin:12px 16px 0;padding:10px 14px;border-radius:12px;background:#E8EEF3;color:var(--main);font-size:14px;cursor:pointer;flex-wrap:wrap;}
 .todo-bar b{font-size:15px;}
@@ -150,8 +152,12 @@ nav.tabs button{font-size:14px;}
       <button data-tab="help">❓ 이용방법</button>
     </nav>
     <div class="todo-bar" id="todo-bar" hidden></div>
+    <div class="perm-bar install" id="install-bar" hidden>
+      <span>💻 PC에 앱으로 설치하면 새 글이 올 때 아이콘에 숫자가 떠요.</span>
+      <button class="btn small" id="install-btn">설치하기</button>
+    </div>
     <div class="perm-bar" id="perm-bar" hidden>
-      <span id="perm-text">🔔 새 글이 오면 Dock 아이콘에 숫자가 뜨도록 알림을 허용해 주세요.</span>
+      <span id="perm-text">🔔 새 글이 오면 앱 아이콘에 숫자가 뜨도록 알림을 허용해 주세요.</span>
       <button class="btn small" id="perm-btn">알림 허용</button>
     </div>
     <main>
@@ -232,6 +238,27 @@ nav.tabs button{font-size:14px;}
           </div>
         </div>
         <div class="card">
+          <h2>💻 PC에 설치하기 (새 글 숫자 보기)</h2>
+          <div class="help">
+            <p>PC에 설치해 두면 새 글이나 내 요청의 진행 상태가 바뀌었을 때 <b>작업 표시줄(맥은 Dock) 아이콘에 빨간 숫자</b>가 떠요.</p>
+            <p style="margin-top:12px;"><b>① 설치하기</b> (크롬 또는 엣지)</p>
+            <ol>
+              <li>화면 위에 파란 <b>설치하기</b> 버튼이 보이면 누르고, 다시 <b>설치</b>를 누릅니다</li>
+              <li>버튼이 없으면 주소창 오른쪽 끝의 <b>설치 아이콘(모니터에 ↓)</b>을 누릅니다<br><span class="hint">그것도 없으면 크롬: ⋮ → 전송, 저장, 공유 → 페이지를 앱으로 설치 / 엣지: ⋯ → 앱 → 이 사이트를 앱으로 설치</span></li>
+            </ol>
+            <p style="margin-top:12px;"><b>② 아이콘 고정하기</b></p>
+            <ol>
+              <li>윈도우: 작업 표시줄의 疏通 아이콘을 오른쪽 클릭 → <b>작업 표시줄에 고정</b></li>
+              <li>맥: Dock의 疏通 아이콘을 오른쪽 클릭 → 옵션 → <b>Dock에 유지</b></li>
+            </ol>
+            <p style="margin-top:12px;"><b>③ 알림 허용하기</b></p>
+            <ol>
+              <li>설치한 앱에서 로그인하면 주황색 칸이 보입니다. <b>알림 허용</b>을 누르고 <b>허용</b>을 누릅니다</li>
+            </ol>
+            <p class="hint">앱을 켜 두면(최소화해도 됨) 1분마다 새 글을 확인합니다. 완전히 끄면 다시 켤 때 숫자가 바뀝니다.</p>
+          </div>
+        </div>
+        <div class="card">
           <h2>✏️ 요청 보내기</h2>
           <div class="help">
             <ol>
@@ -255,6 +282,7 @@ nav.tabs button{font-size:14px;}
               <li><span class="badge s4">보류</span> 지금은 어렵거나 나중에 다시 봅니다</li>
             </ul>
             <p style="margin-top:8px;">요청을 누르면 내용과 댓글을 볼 수 있고, 궁금한 점은 댓글로 주고받으면 됩니다.</p>
+            <p style="margin-top:8px;">새 글, 새 댓글, <b>내 요청의 진행 상태 변경</b>은 탭 옆 <span class="new-dot">1</span> 빨간 숫자와 목록의 빨간 줄로 알려 드려요. 열어 보면 사라집니다.</p>
           </div>
         </div>
         <div class="card">
@@ -659,13 +687,29 @@ function renderPermBar() {
   $('perm-bar').hidden = !installed || perm === 'granted';
   $('perm-btn').hidden = perm === 'denied';
   if (perm === 'denied') $('perm-text').textContent =
-    '🔔 알림이 막혀 있어 Dock에 숫자가 뜨지 않아요. 주소창 왼쪽 자물쇠(또는 ⋮ → 앱 정보)에서 알림을 허용해 주세요.';
+    `🔔 알림이 막혀 있어 ${DOCK}에 숫자가 뜨지 않아요. 오른쪽 위 ⋮ → 앱 정보에서 알림을 허용해 주세요.`;
 }
+const DOCK = /Mac/.test(navigator.platform) ? 'Dock' : '작업 표시줄';
+$('perm-text').textContent = `🔔 새 글이 오면 ${DOCK} 아이콘에 숫자가 뜨도록 알림을 허용해 주세요.`;
+// 크롬·엣지에서 설치할 수 있으면 "설치하기" 버튼을 보여 줌
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  installPrompt = e;
+  $('install-bar').hidden = false;
+});
+window.addEventListener('appinstalled', () => { $('install-bar').hidden = true; installPrompt = null; });
+$('install-btn').onclick = async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  const r = await installPrompt.userChoice;
+  if (r.outcome === 'accepted') { $('install-bar').hidden = true; installPrompt = null; }
+};
 $('perm-btn').onclick = async () => {
   try { await Notification.requestPermission(); } catch (e) {}
   renderPermBar();
   updateBadge();
-  if (Notification.permission === 'granted') toast('이제 새 글이 오면 Dock에 숫자가 떠요');
+  if (Notification.permission === 'granted') toast(`이제 새 글이 오면 ${DOCK}에 숫자가 떠요`);
 };
 // 공지 탭을 띄워 둔 채 다른 창을 보다가 돌아오면 그때 읽음 처리
 window.addEventListener('focus', () => {
