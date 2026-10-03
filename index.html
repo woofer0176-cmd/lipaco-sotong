@@ -73,6 +73,11 @@ textarea{min-height:140px;resize:vertical;}
 .perm-bar{display:flex;align-items:center;gap:10px;margin:12px 16px 0;padding:10px 14px;border-radius:12px;background:#FFF4E5;color:#7A4B00;font-size:14px;}
 .perm-bar span{flex:1;}
 .perm-bar .btn{background:#E53935;}
+[hidden]{display:none !important;}
+.todo-bar{display:flex;align-items:center;gap:8px;margin:12px 16px 0;padding:10px 14px;border-radius:12px;background:#E8EEF3;color:var(--main);font-size:14px;cursor:pointer;flex-wrap:wrap;}
+.todo-bar b{font-size:15px;}
+.todo-bar .more{margin-left:auto;font-weight:700;white-space:nowrap;}
+.todo-bar.done{background:#E3F4E8;color:#1E7B3C;cursor:default;}
 .new-tag{font-size:12px;font-weight:700;color:#E53935;}
 .badge{font-size:12px;padding:1px 9px;border-radius:10px;font-weight:500;white-space:nowrap;}
 .s0{background:#E8EEF3;color:#0B4A7D;}
@@ -144,6 +149,7 @@ nav.tabs button{font-size:14px;}
       <button data-tab="notice">📢 공지<span class="new-dot" id="t-notice" hidden></span></button>
       <button data-tab="help">❓ 이용방법</button>
     </nav>
+    <div class="todo-bar" id="todo-bar" hidden></div>
     <div class="perm-bar" id="perm-bar" hidden>
       <span id="perm-text">🔔 새 글이 오면 Dock 아이콘에 숫자가 뜨도록 알림을 허용해 주세요.</span>
       <button class="btn small" id="perm-btn">알림 허용</button>
@@ -655,13 +661,29 @@ window.addEventListener('focus', () => {
 });
 // 앱을 켜 두면(최소화해도) 1분마다 새 글을 확인
 setInterval(() => { if (me) refresh(true); }, 60000);
+/* 완료 안 된 요청 요약 (모든 탭 위에 표시) */
+const isTodo = r => r.status !== '완료';
+function renderTodo() {
+  const todo = data.requests.filter(isTodo), bar = $('todo-bar');
+  bar.hidden = !data.ready || !data.requests.length;
+  bar.classList.toggle('done', !todo.length);
+  if (!todo.length) { bar.innerHTML = '✅ 모든 요청이 완료되었습니다'; bar.onclick = null; return; }
+  const parts = STATUSES.filter(st => st !== '완료')
+    .map(st => [st, todo.filter(r => r.status === st).length]).filter(x => x[1])
+    .map(([st, n]) => `${esc(st)} ${n}`).join(' · ');
+  bar.innerHTML = `⏳ 아직 완료 안 된 요청 <b>${todo.length}건</b><span>(${parts})</span><span class="more">보기 ›</span>`;
+  bar.onclick = () => { filter = '미완료'; showTab('list'); renderList(); };
+}
 function renderList() {
-  const filters = ['전체', '내 요청'].concat(STATUSES);
+  const filters = ['전체', '미완료', '내 요청'].concat(STATUSES);
+  const count = f => f === '전체' ? data.requests.length : f === '미완료' ? data.requests.filter(isTodo).length
+    : f === '내 요청' ? data.requests.filter(r => r.author === me.name).length : data.requests.filter(r => r.status === f).length;
   $('l-filters').innerHTML = filters.map(f =>
-    `<button class="chip${f === filter ? ' on' : ''}" data-f="${esc(f)}">${esc(f)}</button>`).join('');
+    `<button class="chip${f === filter ? ' on' : ''}" data-f="${esc(f)}">${esc(f)} ${count(f)}</button>`).join('');
   $('l-filters').querySelectorAll('button').forEach(b => b.onclick = () => { filter = b.dataset.f; renderList(); });
+  renderTodo();
   const list = data.requests.filter(r =>
-    filter === '전체' ? true : filter === '내 요청' ? r.author === me.name : r.status === filter);
+    filter === '전체' ? true : filter === '미완료' ? isTodo(r) : filter === '내 요청' ? r.author === me.name : r.status === filter);
   $('l-items').innerHTML = list.length ? list.map(r => {
     const n = unreadOf(r), isNew = !(r.id in seen().req);
     const tag = n ? `<span class="new-tag">${isNew ? '새 요청' : '새 댓글 ' + n}</span>` : '';
